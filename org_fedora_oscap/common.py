@@ -38,7 +38,9 @@ from collections import namedtuple
 import gettext
 from functools import wraps
 from pyanaconda.core import constants
-from pyanaconda.modules.common.constants.services import NETWORK
+from pyanaconda.core.constants import PAYLOAD_TYPE_DNF
+from pyanaconda.modules.common.constants.services import NETWORK, PAYLOADS
+from pyanaconda.modules.common.structures.payload import PackagesConfigurationData
 from pyanaconda.threading import threadMgr, AnacondaThread
 from org_fedora_oscap import utils
 from org_fedora_oscap.data_fetch import fetch_data
@@ -60,7 +62,8 @@ def N_(string): return string
 # everything else should be private
 __all__ = ["run_oscap_remediate", "get_fix_rules_pre",
            "wait_and_fetch_net_data", "extract_data", "strip_content_dir",
-           "OSCAPaddonError"]
+           "OSCAPaddonError", "get_payload_proxy", "get_packages_data",
+           "set_packages_data"]
 
 INSTALLATION_CONTENT_DIR = "/tmp/openscap_data/"
 TARGET_CONTENT_DIR = "/root/openscap_data/"
@@ -535,3 +538,48 @@ def dry_run_skip(func):
             return func(self, *args, **kwargs)
 
     return decorated
+
+
+def get_payload_proxy():
+    """Get the DBus proxy of the active payload.
+
+    :return: a DBus proxy
+    """
+    payloads_proxy = PAYLOADS.get_proxy()
+    object_path = payloads_proxy.ActivePayload
+
+    if not object_path:
+        raise ValueError("Active payload is not set.")
+
+    return PAYLOADS.get_proxy(object_path)
+
+
+def get_packages_data() -> PackagesConfigurationData:
+    """Get the DBus data with the packages configuration.
+
+    :return: a packages configuration
+    """
+    payload_proxy = get_payload_proxy()
+
+    if payload_proxy.Type != PAYLOAD_TYPE_DNF:
+        return PackagesConfigurationData()
+
+    return PackagesConfigurationData.from_structure(
+        payload_proxy.Packages
+    )
+
+
+def set_packages_data(data: PackagesConfigurationData):
+    """Set the DBus data with the packages configuration.
+
+    :param data: a packages configuration
+    """
+    payload_proxy = get_payload_proxy()
+
+    if payload_proxy.Type != PAYLOAD_TYPE_DNF:
+        log.debug("The payload doesn't support packages.")
+        return
+
+    return payload_proxy.SetPackages(
+        PackagesConfigurationData.to_structure(data)
+    )

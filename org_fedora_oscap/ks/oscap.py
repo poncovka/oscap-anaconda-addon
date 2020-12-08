@@ -34,8 +34,7 @@ from pyanaconda.core import util
 from pyanaconda import flags
 from pykickstart.errors import KickstartParseError, KickstartValueError
 from org_fedora_oscap import utils, common, rule_handling, data_fetch
-from org_fedora_oscap.common import SUPPORTED_ARCHIVES, _
-from org_fedora_oscap.content_handling import ContentCheckError
+from org_fedora_oscap.common import SUPPORTED_ARCHIVES, _, get_packages_data, set_packages_data
 
 log = logging.getLogger("anaconda")
 
@@ -492,12 +491,17 @@ class OSCAPdata(AddonData):
 
         # add packages needed on the target system to the list of packages
         # that are requested to be installed
+        packages_data = get_packages_data()
         pkgs_to_install = list(REQUIRED_PACKAGES)
+
         if self.content_type == "scap-security-guide":
             pkgs_to_install.append("scap-security-guide")
+
         for pkg in pkgs_to_install:
-            if pkg not in ksdata.packages.packageList:
-                ksdata.packages.packageList.append(pkg)
+            if pkg not in packages_data.packages:
+                packages_data.packages.append(pkg)
+
+        set_packages_data(packages_data)
 
     def execute(self, storage, ksdata, users, payload):
         """
