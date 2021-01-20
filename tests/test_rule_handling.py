@@ -2,8 +2,11 @@ import pytest
 import mock
 from collections import defaultdict
 
-from pyanaconda.modules.common.constants.objects import FIREWALL, DEVICE_TREE, BOOTLOADER
-from pyanaconda.modules.common.constants.services import NETWORK, STORAGE, USERS
+from pyanaconda.core.constants import PASSWORD_POLICY_ROOT
+from pyanaconda.modules.common.constants.objects import FIREWALL, DEVICE_TREE, BOOTLOADER, \
+    USER_INTERFACE
+from pyanaconda.modules.common.constants.services import NETWORK, STORAGE, USERS, BOSS
+from pyanaconda.modules.common.structures.policy import PasswordPolicy
 
 try:
     from org_fedora_oscap import rule_handling, common
@@ -137,6 +140,19 @@ def proxy_getter(monkeypatch):
 
 
 def set_dbus_defaults():
+    password_policy = PasswordPolicy()
+    password_policy.length = 6
+    password_policy.strict = False
+
+    password_policies = {
+        PASSWORD_POLICY_ROOT: password_policy
+    }
+
+    user_interface = BOSS.get_proxy(USER_INTERFACE)
+    user_interface.PasswordPolicies = PasswordPolicy.to_structure_dict(
+        password_policies
+    )
+
     network = NETWORK.get_proxy()
     network.Connected.return_value = True
 
@@ -520,12 +536,6 @@ def test_evaluation_passwd_minlen_report_only_not_ignored(
 
     messages = rule_data.eval_rules(ksdata_mock, storage_mock, report_only=False)
 
-    # Mock pw_policy returned by anaconda.pwpolicy.get_policy()
-    pw_policy_mock = mock.Mock()
-    pw_policy_mock.minlen = 6
-    pw_policy_mock.strict = False
-    ksdata_mock.anaconda.pwpolicy.get_policy.return_value = pw_policy_mock
-
     # call eval_rules with report_only=False
     # should set password minimal length to 8
     messages = rule_data.eval_rules(ksdata_mock, storage_mock, report_only=False)
@@ -534,9 +544,19 @@ def test_evaluation_passwd_minlen_report_only_not_ignored(
     assert not messages
     assert rule_data._passwd_rules._orig_minlen == 6
     assert not rule_data._passwd_rules._orig_strict
-    assert pw_policy_mock.minlen == 8
-    assert pw_policy_mock.strict
     assert rule_data._passwd_rules._minlen == 8
+
+    pw_policy = PasswordPolicy()
+    pw_policy.length = 8
+    pw_policy.strict = True
+
+    pw_policies = {PASSWORD_POLICY_ROOT: pw_policy}
+
+    ui_mock = BOSS.get_proxy(USER_INTERFACE)
+    ui_mock.SetPasswordPolicies.assert_called_with(
+        PasswordPolicy.to_structure_dict(pw_policies)
+    )
+    ui_mock.SetPasswordPolicies.reset_mock()
 
     # call of eval_rules with report_only=True
     # should not change anything
@@ -546,9 +566,9 @@ def test_evaluation_passwd_minlen_report_only_not_ignored(
 
     assert rule_data._passwd_rules._orig_minlen == 6
     assert not rule_data._passwd_rules._orig_strict
-    assert pw_policy_mock.minlen == 8
-    assert pw_policy_mock.strict
     assert rule_data._passwd_rules._minlen == 8
+
+    ui_mock.SetPasswordPolicies.assert_not_called()
 
 
 def _occurences_not_seen_in_strings(seeked, strings):

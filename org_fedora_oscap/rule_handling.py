@@ -27,11 +27,11 @@ import optparse
 import shlex
 import logging
 
-from pyanaconda.pwpolicy import F22_PwPolicyData
-from pyanaconda.core.constants import (
-    FIREWALL_ENABLED, FIREWALL_DISABLED, FIREWALL_USE_SYSTEM_DEFAULTS)
-from pyanaconda.modules.common.constants.objects import FIREWALL, BOOTLOADER, DEVICE_TREE
-from pyanaconda.modules.common.constants.services import NETWORK, STORAGE, USERS
+from pyanaconda.core.constants import FIREWALL_ENABLED, FIREWALL_DISABLED, PASSWORD_POLICY_ROOT
+from pyanaconda.modules.common.constants.objects import FIREWALL, BOOTLOADER, DEVICE_TREE, \
+    USER_INTERFACE
+from pyanaconda.modules.common.constants.services import NETWORK, STORAGE, USERS, BOSS
+from pyanaconda.modules.common.structures.policy import PasswordPolicy
 
 from org_fedora_oscap import common
 from org_fedora_oscap.common import OSCAPaddonError, RuleMessage
@@ -494,7 +494,6 @@ class PasswdRules(RuleHandler):
         """Constructor initializing attributes."""
 
         self._minlen = 0
-        self._created_policy = False
         self._orig_minlen = None
         self._orig_strict = None
 
@@ -550,37 +549,44 @@ class PasswdRules(RuleHandler):
             return ret
 
         # set the policy in any case (so that a weaker password is not entered)
-        pw_policy = ksdata.anaconda.pwpolicy.get_policy("root")
-        if pw_policy is None:
-            pw_policy = F22_PwPolicyData()
-            log.info("OSCAP addon: setting password policy %s" % pw_policy)
-            ksdata.anaconda.pwpolicy.policyList.append(pw_policy)
-            log.info("OSCAP addon: password policy list: %s" % ksdata.anaconda.pwpolicy.policyList)
-            self._created_policy = True
+        ui_proxy = BOSS.get_proxy(USER_INTERFACE)
 
-        self._orig_minlen = pw_policy.minlen
+        pw_policies = PasswordPolicy.from_structure_dict(
+            ui_proxy.PasswordPolicies
+        )
+
+        pw_policy = pw_policies[PASSWORD_POLICY_ROOT]
+        self._orig_minlen = pw_policy.length
         self._orig_strict = pw_policy.strict
-        pw_policy.minlen = self._minlen
+        pw_policy.length = self._minlen
         pw_policy.strict = True
+
+        ui_proxy.SetPasswordPolicies(
+            PasswordPolicy.to_structure_dict(pw_policies)
+        )
 
         return ret
 
     def revert_changes(self, ksdata, storage):
         """:see: RuleHander.revert_changes"""
+        ui_proxy = BOSS.get_proxy(USER_INTERFACE)
 
-        pw_policy = ksdata.anaconda.pwpolicy.get_policy("root")
-        if self._created_policy:
-            log.info("OSCAP addon: removing password policy: %s" % pw_policy)
-            ksdata.anaconda.pwpolicy.policyList.remove(pw_policy)
-            log.info("OSCAP addon: password policy list: %s" % ksdata.anaconda.pwpolicy.policyList)
-            self._created_policy = False
-        else:
-            if self._orig_minlen is not None:
-                pw_policy.minlen = self._orig_minlen
-                self._orig_minlen = None
-            if self._orig_strict is not None:
-                pw_policy.strict = self._orig_strict
-                self._orig_strict = None
+        pw_policies = PasswordPolicy.from_structure_dict(
+            ui_proxy.PasswordPolicies
+        )
+
+        pw_policy = pw_policies[PASSWORD_POLICY_ROOT]
+
+        if self._orig_minlen is not None:
+            pw_policy.length = self._orig_minlen
+            self._orig_minlen = None
+        if self._orig_strict is not None:
+            pw_policy.strict = self._orig_strict
+            self._orig_strict = None
+
+        ui_proxy.SetPasswordPolicies(
+            PasswordPolicy.to_structure_dict(pw_policies)
+        )
 
 
 class PackageRules(RuleHandler):
